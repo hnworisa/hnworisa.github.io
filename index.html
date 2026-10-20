@@ -1,0 +1,310 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
+<title>Album Drop AR</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Unbounded:wght@500;800&family=IBM+Plex+Mono:wght@400;600&display=swap">
+<style>
+  /* Full-bleed camera, thin HUD rails top and bottom, one start sheet. */
+  :root {
+    --ink: #0b0b0c;
+    --paper: #f3efe6;
+    --flare: #ff6a1a;
+    --dim: rgba(11, 11, 12, .72);
+    --line: rgba(243, 239, 230, .18);
+    --display: "Unbounded", "Arial Black", system-ui, sans-serif;
+    --mono: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+    color-scheme: dark;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: var(--ink); color: var(--paper); font-family: var(--mono); -webkit-tap-highlight-color: transparent; }
+  #cam, #gl { position: fixed; inset: 0; width: 100%; height: 100%; }
+  #cam { object-fit: cover; background: var(--ink); }
+  #gl { pointer-events: none; }
+
+  .rail { position: fixed; left: 0; right: 0; display: flex; gap: 8px; align-items: center; justify-content: space-between;
+    padding-left: max(14px, env(safe-area-inset-left, 0px)); padding-right: max(14px, env(safe-area-inset-right, 0px)); }
+  #top { top: 0; padding-top: calc(env(safe-area-inset-top, 0px) + 12px); }
+  #bottom { bottom: 0; padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 14px); flex-direction: column; align-items: stretch; }
+  .pill { background: var(--dim); border: 1px solid var(--line); border-radius: 999px; padding: 8px 14px; font-size: 12px; backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); }
+  #spotName { font-family: var(--display); font-weight: 500; letter-spacing: .04em; text-transform: uppercase; font-size: 11px; }
+  #dist { font-weight: 600; font-variant-numeric: tabular-nums; }
+  #msg { text-align: center; font-size: 14px; line-height: 1.4; padding: 12px 16px; border-radius: 14px; }
+  .row { display: flex; gap: 8px; }
+  button { font: inherit; color: var(--paper); background: var(--dim); border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; font-size: 13px; flex: 1; cursor: pointer; }
+  button:focus-visible { outline: 2px solid var(--flare); outline-offset: 2px; }
+  button.on { background: var(--flare); color: var(--ink); border-color: var(--flare); font-weight: 600; }
+  #debug { font-size: 10px; opacity: .75; text-align: center; font-variant-numeric: tabular-nums; }
+
+  #arrow { position: fixed; top: 50%; width: 64px; height: 64px; margin-top: -32px; display: grid; place-items: center;
+    border-radius: 50%; background: var(--flare); color: var(--ink); font-size: 30px; font-weight: 800; box-shadow: 0 0 30px rgba(255,106,26,.6); transition: opacity .2s; }
+  #arrow.left { left: max(14px, env(safe-area-inset-left, 0px)); }
+  #arrow.right { right: max(14px, env(safe-area-inset-right, 0px)); }
+
+  #start { position: fixed; inset: 0; z-index: 5; display: flex; flex-direction: column; justify-content: flex-end; gap: 22px;
+    background: radial-gradient(120% 70% at 50% 18%, #2a1407 0%, var(--ink) 62%);
+    padding: calc(env(safe-area-inset-top, 0px) + 24px) max(22px, env(safe-area-inset-right, 0px)) calc(env(safe-area-inset-bottom, 0px) + 28px) max(22px, env(safe-area-inset-left, 0px)); }
+  #start .disc { width: min(62vw, 260px); aspect-ratio: 1; max-width: 100%; border-radius: 50%; margin: auto auto 0;
+    background: repeating-radial-gradient(circle, #151517 0 3px, #1f1f22 3px 5px); position: relative; animation: spin 6s linear infinite; }
+  #start .disc::after { content: ""; position: absolute; inset: 34%; border-radius: 50%; background: var(--flare); box-shadow: inset 0 0 0 6px #e05510; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  @media (prefers-reduced-motion: reduce) { #start .disc { animation: none; } }
+  #start h1 { font-family: var(--display); font-weight: 800; font-size: clamp(30px, 9vw, 48px); line-height: .95; margin: 0; text-wrap: balance; }
+  #start p { margin: 0; font-size: 13px; line-height: 1.55; max-width: 38ch; opacity: .85; }
+  #start .warn { border-left: 3px solid var(--flare); padding-left: 10px; }
+  #go { background: var(--flare); color: var(--ink); border: 0; font-weight: 600; font-size: 15px; padding: 16px; flex: none; }
+  #err { color: var(--flare); font-size: 12px; min-height: 1em; }
+</style>
+</head>
+<body>
+<video id="cam" playsinline muted autoplay></video>
+<canvas id="gl"></canvas>
+
+<div id="top" class="rail" hidden>
+  <span class="pill" id="spotName">Spot 01</span>
+  <span class="pill" id="dist">—</span>
+</div>
+<div id="arrow" class="right" hidden>›</div>
+<div id="bottom" class="rail" hidden>
+  <div class="pill" id="msg">Getting your location…</div>
+  <div class="row">
+    <button id="testBtn" type="button">Test mode: off</button>
+    <button id="dbgBtn" type="button">Info</button>
+  </div>
+  <div id="debug" hidden></div>
+</div>
+
+<div id="start">
+  <div class="disc" aria-hidden="true"></div>
+  <h1>Something is hovering over the city.</h1>
+  <p>Go to the spot, point your camera at the sky above it, and find the new album floating there.</p>
+  <p class="warn">Stay on the pavement. Never stand in the road to look up.</p>
+  <button id="go" type="button">Open camera</button>
+  <div id="err"></div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+/* ============ CONFIG ============ */
+const SPOT = {
+  name: "Spot 01",
+  lat: 6.431300,
+  lng: 3.436190,
+  heightAboveGround: 25,   // metres the cover floats above the spot
+  coverSize: 10,           // metres wide
+  showWithin: 400,         // metres; beyond this, show directions only
+  coverImage: "cover.jpg"  // drop a square cover.jpg next to this file; placeholder art is used otherwise
+};
+const EYE = 1.5;            // phone height above ground (m)
+const TEST_DISTANCE = 50;   // test mode: metres in front of you
+/* ================================ */
+
+const $ = id => document.getElementById(id);
+const toRad = d => d * Math.PI / 180;
+const norm360 = d => ((d % 360) + 360) % 360;
+
+let user = null, gpsAcc = null;       // smoothed {lat,lng}
+let ori = null, compassOffset = null, headingAbsolute = false;
+let testMode = false, testOffset = null;
+let posInit = false, quatInit = false;
+
+/* ---------- three.js scene ---------- */
+const renderer = new THREE.WebGLRenderer({ canvas: $("gl"), alpha: true, antialias: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setClearColor(0x000000, 0);
+renderer.outputEncoding = THREE.sRGBEncoding;
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(62, innerWidth / innerHeight, 0.5, 3000);
+function resize() {
+  renderer.setSize(innerWidth, innerHeight, false);
+  camera.aspect = innerWidth / innerHeight;
+  camera.updateProjectionMatrix();
+}
+addEventListener("resize", resize); resize();
+
+function placeholderCover() {
+  const c = document.createElement("canvas"); c.width = c.height = 1024;
+  const g = c.getContext("2d");
+  g.fillStyle = "#0b0b0c"; g.fillRect(0, 0, 1024, 1024);
+  for (let r = 500; r > 180; r -= 7) { g.beginPath(); g.arc(512, 512, r, 0, 7); g.strokeStyle = r % 14 ? "#1d1d20" : "#26262a"; g.lineWidth = 3; g.stroke(); }
+  g.beginPath(); g.arc(512, 512, 180, 0, 7); g.fillStyle = "#ff6a1a"; g.fill();
+  g.beginPath(); g.arc(512, 512, 12, 0, 7); g.fillStyle = "#0b0b0c"; g.fill();
+  g.fillStyle = "#0b0b0c"; g.textAlign = "center";
+  g.font = "800 46px Unbounded, Arial Black, sans-serif"; g.fillText("NEW ALBUM", 512, 470);
+  g.font = "600 30px IBM Plex Mono, monospace"; g.fillText("OUT SOON", 512, 590);
+  g.fillStyle = "#f3efe6"; g.font = "600 26px IBM Plex Mono, monospace"; g.fillText("REPLACE WITH COVER.JPG", 512, 985);
+  const t = new THREE.CanvasTexture(c); t.encoding = THREE.sRGBEncoding; return t;
+}
+function glowTexture() {
+  const c = document.createElement("canvas"); c.width = c.height = 256;
+  const g = c.getContext("2d"), grd = g.createRadialGradient(128, 128, 0, 128, 128, 128);
+  grd.addColorStop(0, "rgba(255,140,60,.9)"); grd.addColorStop(.4, "rgba(255,106,26,.35)"); grd.addColorStop(1, "rgba(255,106,26,0)");
+  g.fillStyle = grd; g.fillRect(0, 0, 256, 256);
+  return new THREE.CanvasTexture(c);
+}
+
+const group = new THREE.Group(); group.visible = false; scene.add(group);
+const coverMat = new THREE.MeshBasicMaterial({ map: placeholderCover() });
+const edgeMat = new THREE.MeshBasicMaterial({ color: 0x111113 });
+const cover = new THREE.Mesh(new THREE.BoxGeometry(SPOT.coverSize, SPOT.coverSize, SPOT.coverSize * 0.03),
+  [edgeMat, edgeMat, edgeMat, edgeMat, coverMat, coverMat]);
+group.add(cover);
+new THREE.TextureLoader().load(SPOT.coverImage, t => { t.encoding = THREE.sRGBEncoding; coverMat.map = t; coverMat.needsUpdate = true; }, undefined, () => {});
+
+const glow = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTexture(), blending: THREE.AdditiveBlending, depthWrite: false, transparent: true }));
+glow.scale.set(SPOT.coverSize * 2.4, SPOT.coverSize * 2.4, 1); glow.position.z = -0.5; group.add(glow);
+
+const H = SPOT.heightAboveGround;
+const beam = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 1.6, H - SPOT.coverSize / 2, 24, 1, true),
+  new THREE.MeshBasicMaterial({ color: 0xff6a1a, transparent: true, opacity: 0.16, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide }));
+beam.position.y = -SPOT.coverSize / 2 - (H - SPOT.coverSize / 2) / 2; group.add(beam);
+const ring = new THREE.Mesh(new THREE.RingGeometry(3, 3.8, 64),
+  new THREE.MeshBasicMaterial({ color: 0xff6a1a, transparent: true, opacity: 0.5, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide }));
+ring.rotation.x = -Math.PI / 2; ring.position.y = -H; group.add(ring);
+
+const pts = new Float32Array(150 * 3);
+for (let i = 0; i < 150; i++) { const r = 7 + Math.random() * 5, a = Math.random() * 6.283, y = (Math.random() - .5) * 10;
+  pts[i * 3] = Math.cos(a) * r; pts[i * 3 + 1] = y; pts[i * 3 + 2] = Math.sin(a) * r; }
+const pGeo = new THREE.BufferGeometry(); pGeo.setAttribute("position", new THREE.BufferAttribute(pts, 3));
+const particles = new THREE.Points(pGeo, new THREE.PointsMaterial({ color: 0xffb27a, size: 0.35, transparent: true, opacity: .85, blending: THREE.AdditiveBlending, depthWrite: false }));
+group.add(particles);
+
+/* ---------- device orientation → camera ---------- */
+const zee = new THREE.Vector3(0, 0, 1), euler = new THREE.Euler(),
+  q0 = new THREE.Quaternion(), q1 = new THREE.Quaternion(-Math.sqrt(.5), 0, 0, Math.sqrt(.5)), tq = new THREE.Quaternion();
+function screenAngle() { return toRad((screen.orientation && screen.orientation.angle) || window.orientation || 0); }
+
+function onOri(e, isAbsEvent) {
+  if (e.alpha == null) return;
+  let alpha = e.alpha;
+  if (typeof e.webkitCompassHeading === "number" && !isNaN(e.webkitCompassHeading)) {
+    // iOS: alpha is relative; derive a smoothed offset to true north from the compass
+    const off = norm360(360 - e.webkitCompassHeading - e.alpha);
+    if (compassOffset == null) compassOffset = off;
+    else { let d = ((off - compassOffset + 540) % 360) - 180; compassOffset = norm360(compassOffset + d * 0.05); }
+    alpha = e.alpha + compassOffset; headingAbsolute = true;
+  } else {
+    headingAbsolute = isAbsEvent || e.absolute === true;
+  }
+  ori = { alpha, beta: e.beta, gamma: e.gamma };
+}
+
+function orientationTarget() {
+  euler.set(toRad(ori.beta), toRad(ori.alpha), -toRad(ori.gamma), "YXZ");
+  tq.setFromEuler(euler); tq.multiply(q1); tq.multiply(q0.setFromAxisAngle(zee, -screenAngle()));
+  return tq;
+}
+
+/* ---------- GPS ---------- */
+function onPos(p) {
+  const { latitude: lat, longitude: lng, accuracy } = p.coords;
+  gpsAcc = accuracy;
+  if (accuracy > 80 && user) return;               // ignore very poor fixes once we have one
+  if (!user) user = { lat, lng };
+  else { const k = accuracy < 15 ? 0.5 : 0.25; user.lat += (lat - user.lat) * k; user.lng += (lng - user.lng) * k; }
+}
+
+/* ---------- start ---------- */
+$("go").addEventListener("click", async () => {
+  $("err").textContent = "";
+  let oriPerm = Promise.resolve("granted");
+  if (window.DeviceOrientationEvent && typeof DeviceOrientationEvent.requestPermission === "function") oriPerm = DeviceOrientationEvent.requestPermission();
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: "environment" } }, audio: false });
+    $("cam").srcObject = stream; await $("cam").play().catch(() => {});
+  } catch (e) { $("err").textContent = "Camera blocked. Allow camera access for this site and reload."; return; }
+  try { if ((await oriPerm) !== "granted") throw 0; }
+  catch (e) { $("err").textContent = "Motion sensors blocked. Allow Motion & Orientation access and reload."; return; }
+  if ("ondeviceorientationabsolute" in window) addEventListener("deviceorientationabsolute", e => onOri(e, true));
+  else addEventListener("deviceorientation", e => onOri(e, false));
+  if (navigator.geolocation) navigator.geolocation.watchPosition(onPos,
+    () => setMsg("Location blocked. Allow location access, or use Test mode."), { enableHighAccuracy: true, maximumAge: 1000, timeout: 20000 });
+  $("start").hidden = true; ["top", "bottom"].forEach(id => $(id).hidden = false);
+  $("spotName").textContent = SPOT.name;
+  requestAnimationFrame(loop);
+});
+
+$("testBtn").addEventListener("click", () => {
+  testMode = !testMode;
+  if (testMode) {
+    const dir = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion); dir.y = 0;
+    if (dir.lengthSq() < 1e-4) dir.set(0, 0, -1); dir.normalize();
+    testOffset = { east: dir.x * TEST_DISTANCE, north: -dir.z * TEST_DISTANCE };
+  }
+  posInit = false;
+  $("testBtn").textContent = "Test mode: " + (testMode ? "on" : "off");
+  $("testBtn").classList.toggle("on", testMode);
+});
+$("dbgBtn").addEventListener("click", () => { $("debug").hidden = !$("debug").hidden; });
+
+/* ---------- loop ---------- */
+const desired = new THREE.Vector3(), v = new THREE.Vector3();
+let last = performance.now(), lastMsg = "";
+function setMsg(t) { if (t !== lastMsg) { $("msg").textContent = t; lastMsg = t; } }
+function fmt(m) { return m < 1000 ? Math.round(m) + " m" : (m / 1000).toFixed(1) + " km"; }
+
+function loop(now) {
+  const dt = Math.min((now - last) / 1000, 0.1); last = now;
+
+  if (ori) {
+    orientationTarget();
+    if (!quatInit) { camera.quaternion.copy(tq); quatInit = true; } else camera.quaternion.slerp(tq, 0.2);
+  }
+
+  let east = null, north = null;
+  if (testMode && testOffset) { east = testOffset.east; north = testOffset.north; }
+  else if (user) {
+    east = (SPOT.lng - user.lng) * Math.cos(toRad(user.lat)) * 111320;
+    north = (SPOT.lat - user.lat) * 110574;
+  }
+
+  let dist = null;
+  if (east != null) {
+    dist = Math.hypot(east, north);
+    desired.set(east, H - EYE, -north);
+    if (!posInit) { group.position.copy(desired); posInit = true; } else group.position.lerp(desired, 0.08);
+    group.visible = testMode || dist <= SPOT.showWithin;
+    $("dist").textContent = fmt(dist) + (gpsAcc && !testMode ? "  ±" + Math.round(gpsAcc) + "m" : "");
+  }
+
+  cover.rotation.y += dt * 0.9;
+  particles.rotation.y -= dt * 0.15;
+  glow.material.opacity = 0.75 + Math.sin(now / 600) * 0.2;
+  ring.scale.setScalar(1 + (now / 1500 % 1) * 0.6); ring.material.opacity = 0.5 * (1 - (now / 1500 % 1));
+
+  // guidance
+  const arrow = $("arrow");
+  if (!ori) setMsg("Waiting for motion sensors…");
+  else if (dist == null) setMsg("Getting your location… or tap Test mode.");
+  else {
+    camera.updateMatrixWorld();
+    v.copy(group.position).applyMatrix4(camera.matrixWorldInverse);
+    const ndc = group.position.clone().project(camera);
+    const inView = v.z < 0 && Math.abs(ndc.x) < 0.9 && Math.abs(ndc.y) < 0.9;
+    if (!group.visible) {
+      setMsg(`Head toward ${SPOT.name}. It appears within ${SPOT.showWithin} m.`);
+    } else if (inView) {
+      setMsg(headingAbsolute ? "Found it. Keep it in frame." : "Found it. Compass may be off; wave your phone in a figure 8.");
+    } else {
+      const ang = Math.atan2(v.x, -v.z);
+      const up = v.z < 0 && ndc.y > 0.9;
+      setMsg(up ? "Tilt your phone up." : (ang > 0 ? "Turn right." : "Turn left."));
+    }
+    const showArrow = !inView || !group.visible;
+    arrow.hidden = !showArrow;
+    if (showArrow) { const right = Math.atan2(v.x, -v.z) > 0; arrow.className = right ? "right" : "left"; arrow.textContent = right ? "›" : "‹"; }
+  }
+
+  if (!$("debug").hidden) {
+    const hdg = ori ? Math.round(norm360(360 - ori.alpha)) : "–";
+    $("debug").textContent = `you ${user ? user.lat.toFixed(6) + ", " + user.lng.toFixed(6) : "–"} · ±${gpsAcc ? Math.round(gpsAcc) : "–"}m · heading ${hdg}° ${headingAbsolute ? "(true)" : "(relative)"}`;
+  }
+
+  renderer.render(scene, camera);
+  requestAnimationFrame(loop);
+}
+</script>
+</body>
+</html>
