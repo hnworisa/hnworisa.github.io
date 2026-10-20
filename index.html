@@ -19,6 +19,7 @@
     color-scheme: dark;
   }
   * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
   html, body { margin: 0; height: 100%; overflow: hidden; background: var(--ink); color: var(--paper); font-family: var(--mono); -webkit-tap-highlight-color: transparent; }
   #cam, #gl { position: fixed; inset: 0; width: 100%; height: 100%; }
   #cam { object-fit: cover; background: var(--ink); }
@@ -87,6 +88,12 @@
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <script>
+function showErr(m) { const el = document.getElementById("err"), msg = document.getElementById("msg");
+  if (el) el.textContent = m; if (msg) msg.textContent = m; }
+addEventListener("error", e => showErr("Error: " + e.message));
+addEventListener("unhandledrejection", e => showErr("Error: " + (e.reason && e.reason.message || e.reason)));
+if (!window.THREE) showErr("3D library failed to load. Check your connection and reload.");
+
 /* ============ CONFIG ============ */
 const SPOT = {
   name: "Spot 01",
